@@ -14,5 +14,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+use std::path::PathBuf;
 
-pub mod common_services;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    tonic_prost_build::configure()
+        .out_dir(out_dir)
+        .type_attribute(
+            "scout_firmware_upgrade.ScoutFirmwareUpgradeTask",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .type_attribute(
+            "scout_firmware_upgrade.FileArtifact",
+            "#[derive(serde::Serialize, serde::Deserialize)]",
+        )
+        .compile_protos(&["scout_firmware_upgrade.proto"], &["../rpc/proto"])?;
+
+    Ok(())
+}

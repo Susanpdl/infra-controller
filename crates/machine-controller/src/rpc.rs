@@ -15,4 +15,7 @@
  * limitations under the License.
  */
 
-pub mod common_services;
+#[allow(dead_code)]
+pub(crate) mod scout_firmware_upgrade {
+    include!(concat!(env!("OUT_DIR"), "/scout_firmware_upgrade.rs"));
+}
