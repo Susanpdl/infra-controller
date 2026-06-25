@@ -59,6 +59,9 @@ version-compare = { workspace = true }
 
 [dev-dependencies]
 bmc-mock = { path = "../bmc-mock" }
+opentelemetry-prometheus = { workspace = true }
+prometheus = { workspace = true }
+
 bmc-vendor = { path = "../bmc-vendor" }
 carbide-api-model = { path = "../api-model", default-features = false, features = [
   "test-support",

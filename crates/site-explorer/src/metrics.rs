@@ -920,30 +920,96 @@ pub fn exploration_error_to_metric_label(error: &EndpointExplorationError) -> St
 
 #[cfg(test)]
 mod tests {
+    use carbide_test_support::Outcome::*;
+    use carbide_test_support::scenarios;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use prometheus::{Encoder, TextEncoder};
+
     use super::*;
+
+    struct LatencyHistogramTestMeter {
+        meter_provider: SdkMeterProvider,
+        registry: prometheus::Registry,
+    }
+
+    impl LatencyHistogramTestMeter {
+        fn new(name_filter: &'static str) -> Self {
+            let registry = prometheus::Registry::new();
+            let metrics_exporter = opentelemetry_prometheus::exporter()
+                .with_registry(registry.clone())
+                .without_scope_info()
+                .without_target_info()
+                .build()
+                .unwrap();
+
+            let meter_provider = SdkMeterProvider::builder()
+                .with_reader(metrics_exporter)
+                .with_view(site_explorer_latency_histogram_view(name_filter).unwrap())
+                .build();
+
+            Self {
+                meter_provider,
+                registry,
+            }
+        }
+
+        fn export_metrics(&self) -> String {
+            let mut buffer = vec![];
+            let encoder = TextEncoder::new();
+            let metric_families = self.registry.gather();
+            encoder.encode(&metric_families, &mut buffer).unwrap();
+            String::from_utf8(buffer).unwrap()
+        }
+    }
 
     #[test]
     fn site_explorer_latency_histogram_views_build() {
-        let cases = [
-            (
-                "carbide_site_explorer_iteration_latency",
-                "iteration latency",
-            ),
-            (
-                "carbide_site_explorer_*_latency",
-                "carbide site explorer latency glob",
-            ),
-            (
-                "carbide_endpoint_exploration_duration",
-                "endpoint exploration duration",
-            ),
-        ];
+        scenarios!(
+            run = |name_filter: &'static str| {
+                site_explorer_latency_histogram_view(name_filter)
+                    .map(|_| ())
+                    .map_err(drop)
+            };
+            "iteration latency" {
+                "carbide_site_explorer_iteration_latency" => Yields(()),
+            }
 
-        for (name_filter, label) in cases {
-            site_explorer_latency_histogram_view(name_filter).unwrap_or_else(|error| {
-                panic!("{label} view must build: {error}");
-            });
-        }
+            "carbide site explorer latency glob" {
+                "carbide_site_explorer_*_latency" => Yields(()),
+            }
+
+            "endpoint exploration duration" {
+                "carbide_endpoint_exploration_duration" => Yields(()),
+            }
+        );
+    }
+
+    #[test]
+    fn site_explorer_latency_histogram_redistributes_observations_above_ten_seconds() {
+        let test_meter =
+            LatencyHistogramTestMeter::new("carbide_site_explorer_iteration_latency");
+        let meter = test_meter.meter_provider.meter("site-explorer-test");
+        let histogram = meter
+            .f64_histogram("carbide_site_explorer_iteration_latency")
+            .with_unit("ms")
+            .build();
+
+        histogram.record(30_000.0, &[]);
+
+        let encoded = test_meter.export_metrics();
+        assert!(
+            encoded.contains(
+                r#"carbide_site_explorer_iteration_latency_milliseconds_bucket{le="30000"} 1"#
+            ),
+            "expected 30s observation in the 30000ms bucket, got:\n{encoded}"
+        );
+        assert!(
+            !encoded.contains(
+                r#"carbide_site_explorer_iteration_latency_milliseconds_bucket{le="10000"} 1"#
+            ),
+            "30s observation should not land in the 10000ms bucket:\n{encoded}"
+        );
     }
 }
 
