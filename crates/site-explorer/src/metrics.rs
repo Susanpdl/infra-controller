@@ -918,6 +918,40 @@ pub fn exploration_error_to_metric_label(error: &EndpointExplorationError) -> St
     .to_string()
 }
 
+/// Stores Metric data shared between SiteExplorer and the OpenTelemetry background task
+pub struct MetricHolder {
+    instruments: SiteExplorerInstruments,
+    last_iteration_metrics: SharedMetricsHolder<SiteExplorationMetrics>,
+}
+
+impl MetricHolder {
+    pub fn new(
+        meter: Meter,
+        hold_period: std::time::Duration,
+        config: &SiteExplorerConfig,
+    ) -> Self {
+        let last_iteration_metrics = SharedMetricsHolder::with_hold_period(hold_period);
+        let instruments =
+            SiteExplorerInstruments::new(meter, last_iteration_metrics.clone(), config);
+        Self {
+            instruments,
+            last_iteration_metrics,
+        }
+    }
+
+    /// Updates the most recent metrics
+    pub fn update_metrics(&self, mut metrics: SiteExplorationMetrics) {
+        // Emit the last recent latency metrics
+        self.instruments.emit_latency_metrics(&metrics);
+        // We don't need to store the latency metrics anymore
+        metrics.endpoint_exploration_duration.clear();
+        metrics.endpoint_exploration_step_latency.clear();
+        metrics.site_explorer_phase_latency.clear();
+        // And store the remaining metrics
+        self.last_iteration_metrics.update(metrics);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use carbide_test_support::Outcome::*;
@@ -1010,39 +1044,5 @@ mod tests {
             ),
             "30s observation should not land in the 10000ms bucket:\n{encoded}"
         );
-    }
-}
-
-/// Stores Metric data shared between SiteExplorer and the OpenTelemetry background task
-pub struct MetricHolder {
-    instruments: SiteExplorerInstruments,
-    last_iteration_metrics: SharedMetricsHolder<SiteExplorationMetrics>,
-}
-
-impl MetricHolder {
-    pub fn new(
-        meter: Meter,
-        hold_period: std::time::Duration,
-        config: &SiteExplorerConfig,
-    ) -> Self {
-        let last_iteration_metrics = SharedMetricsHolder::with_hold_period(hold_period);
-        let instruments =
-            SiteExplorerInstruments::new(meter, last_iteration_metrics.clone(), config);
-        Self {
-            instruments,
-            last_iteration_metrics,
-        }
-    }
-
-    /// Updates the most recent metrics
-    pub fn update_metrics(&self, mut metrics: SiteExplorationMetrics) {
-        // Emit the last recent latency metrics
-        self.instruments.emit_latency_metrics(&metrics);
-        // We don't need to store the latency metrics anymore
-        metrics.endpoint_exploration_duration.clear();
-        metrics.endpoint_exploration_step_latency.clear();
-        metrics.site_explorer_phase_latency.clear();
-        // And store the remaining metrics
-        self.last_iteration_metrics.update(metrics);
     }
 }
